@@ -11,6 +11,11 @@ tf.get_logger().setLevel(logging.ERROR)
 import layers
 import preprocess
 import numpy as np
+from tensorflow.keras.preprocessing.sequence import pad_sequences
+from tensorflow.keras.layers import Dense, GlobalAveragePooling1D, Embedding
+
+GLove_path = '{}\glove.6B\glove.6B.50d.txt'.format(os.path.dirname(os.path.abspath(__file__)))
+
 
 print("tf.__version__:", tf.__version__)
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -65,6 +70,72 @@ class BiDAF:
         # TODO：homework：使用glove word embedding（或自己训练的w2v） 和 CNN char embedding 
         cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
         qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
+
+        ds = preprocess.Preprocessor([
+            './data/squad/train-v1.1.json',
+            './data/squad/dev-v1.1.json',
+            './data/squad/dev-v1.1.json'
+        ])
+        # 获得glove需要的word字符集
+        word_index = ds.build_words()
+        # 获得char cnn需要的char字符集
+        ch2id, id2ch, charset, charEmbedding = ds.build_charset()
+
+        word_num = 10000
+        # GloVe的向量维度
+        embedding_dim = 100
+
+        # 调用glove
+        embeddings_index = {}
+        # embedding_weight = np.zeros([word_num, embedding_dim])
+        embedding_weight = np.random.uniform(-0.05, 0.05, size=[word_num, embedding_dim])
+        with open(GLove_path, 'r') as f:
+            for line in f:
+                values = line.split()
+                word = values[0]
+                coefs = np.asarray(values[1:], dtype='float32')
+                embeddings_index[word] = coefs
+
+        # 匹配GloVe向量
+        embedding_matrix = np.zeros((word_num, embedding_dim))
+        for word, i in word_index.items():
+            if i < word_num:
+                embedding_vector = embeddings_index.get(word)
+                if embedding_vector is not None:
+                    # Words not found in embedding index will be all-zeros.
+                    embedding_matrix[i] = embedding_vector
+
+        model = tf.keras.Sequential()
+        model.add(Embedding(word_num, embedding_dim, weights=[embedding_weight]))
+
+        # model.add(GlobalAveragePooling1D())
+        # model.add(Dense(128, activation=tf.nn.relu))
+        # model.add(Dense(2, activation='softmax'))
+        # model.summary()
+
+        with tf.Graph().as_default():
+
+            session_conf = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
+            session_conf.gpu_options.allow_growth = True
+            session_conf.gpu_options.per_process_gpu_memory_fraction = 0.9  # 配置gpu占用率
+            config = session_conf
+            sess = tf.Session(config=session_conf)
+
+        self.inputX = tf.placeholder(tf.int32, [None, config.sequenceLength], name="inputX")
+        self.inputY = tf.placeholder(tf.float32, [None, 1], name="inputY")
+        self.dropoutKeepProb = tf.placeholder(tf.float32, name="dropoutKeepProb")
+        self.isTraining = tf.placeholder(tf.bool, name="isTraining")
+
+        # 字符嵌入
+        with tf.name_scope("embedding"):
+
+            # 利用one-hot的字符向量作为初始化词嵌入矩阵
+            self.W = tf.Variable(tf.cast(charEmbedding, dtype=tf.float32, name="charEmbedding"), name="W")
+            # 获得字符嵌入
+            self.embededChars = tf.nn.embedding_lookup(self.W, self.inputX)
+            # 添加一个通道维度
+            self.embededCharsExpand = tf.expand_dims(self.embededChars, -1)
+
 
         embedding_layer = tf.keras.layers.Embedding(self.max_features,
                                                     self.emb_size,
