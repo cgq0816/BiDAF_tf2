@@ -61,7 +61,7 @@ class BiDAF:
         self.num_decoders = num_decoders
         self.decoder_dropout = decoder_dropout
 
-    def build_model(self):
+    def build_model(self, word_index, charEmbedding):
         """
         构建模型
         :return:
@@ -70,16 +70,6 @@ class BiDAF:
         # TODO：homework：使用glove word embedding（或自己训练的w2v） 和 CNN char embedding 
         cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
         qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
-
-        ds = preprocess.Preprocessor([
-            './data/squad/train-v1.1.json',
-            './data/squad/dev-v1.1.json',
-            './data/squad/dev-v1.1.json'
-        ])
-        # 获得glove需要的word字符集
-        word_index = ds.build_words()
-        # 获得char cnn需要的char字符集
-        ch2id, id2ch, charset, charEmbedding = ds.build_charset()
 
         word_num = 10000
         # GloVe的向量维度
@@ -283,6 +273,12 @@ if __name__ == '__main__':
         './data/squad/dev-v1.1.json',
         './data/squad/dev-v1.1.json'
     ])
+
+    # 获得glove需要的word字符集
+    word_index = ds.build_words()
+    # 获得char cnn需要的char字符集
+    ch2id, id2ch, charset, charEmbedding = ds.build_charset()
+
     train_c, train_q, train_y = ds.get_dataset('./data/squad/train-v1.1.json')
     test_c, test_q, test_y = ds.get_dataset('./data/squad/dev-v1.1.json')
 
