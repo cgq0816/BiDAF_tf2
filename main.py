@@ -61,24 +61,21 @@ class BiDAF:
         self.num_decoders = num_decoders
         self.decoder_dropout = decoder_dropout
 
-    def build_model(self, word_index, charEmbedding):
+    def build_model(self, word_index, charEmbedding, charset):
         """
         构建模型
         :return:
         """
         # 1 embedding 层
         # TODO：homework：使用glove word embedding（或自己训练的w2v） 和 CNN char embedding 
-        cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
-        qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
 
+        # glove word embedding的获取
         word_num = 10000
         # GloVe的向量维度
         embedding_dim = 100
 
         # 调用glove
         embeddings_index = {}
-        # embedding_weight = np.zeros([word_num, embedding_dim])
-        embedding_weight = np.random.uniform(-0.05, 0.05, size=[word_num, embedding_dim])
         with open(GLove_path, 'r') as f:
             for line in f:
                 values = line.split()
@@ -87,45 +84,39 @@ class BiDAF:
                 embeddings_index[word] = coefs
 
         # 匹配GloVe向量
-        embedding_matrix = np.zeros((word_num, embedding_dim))
+        # embedding_weight = np.zeros([word_num, embedding_dim])
+        # 10000*100维度
+        embedding_matrix = np.random.uniform(-0.05, 0.05, size=[word_num, embedding_dim])
         for word, i in word_index.items():
             if i < word_num:
                 embedding_vector = embeddings_index.get(word)
                 if embedding_vector is not None:
-                    # Words not found in embedding index will be all-zeros.
+                    # Words在embedding index没找到就置0.
                     embedding_matrix[i] = embedding_vector
 
+        # 获得单词嵌入
+        embededWords = tf.nn.embedding_lookup()
         model = tf.keras.Sequential()
-        model.add(Embedding(word_num, embedding_dim, weights=[embedding_weight]))
+        model.add(Embedding(word_num, embedding_dim, weights=[embedding_matrix]))
 
-        # model.add(GlobalAveragePooling1D())
-        # model.add(Dense(128, activation=tf.nn.relu))
-        # model.add(Dense(2, activation='softmax'))
-        # model.summary()
-
-        with tf.Graph().as_default():
-
-            session_conf = tf.ConfigProto(allow_soft_placement=True, log_device_placement=False)
-            session_conf.gpu_options.allow_growth = True
-            session_conf.gpu_options.per_process_gpu_memory_fraction = 0.9  # 配置gpu占用率
-            config = session_conf
-            sess = tf.Session(config=session_conf)
-
-        self.inputX = tf.placeholder(tf.int32, [None, config.sequenceLength], name="inputX")
-        self.inputY = tf.placeholder(tf.float32, [None, 1], name="inputY")
-        self.dropoutKeepProb = tf.placeholder(tf.float32, name="dropoutKeepProb")
-        self.isTraining = tf.placeholder(tf.bool, name="isTraining")
+        # CNN char embedding的获取
+        inputX = tf.placeholder(tf.int32, [None, len(charset)], name="inputX")
 
         # 字符嵌入
-        with tf.name_scope("embedding"):
+        with tf.name_scope("CNN char embedding"):
 
             # 利用one-hot的字符向量作为初始化词嵌入矩阵
-            self.W = tf.Variable(tf.cast(charEmbedding, dtype=tf.float32, name="charEmbedding"), name="W")
+            W = tf.Variable(tf.cast(charEmbedding, dtype=tf.float32, name="charEmbedding"), name="W")
             # 获得字符嵌入
-            self.embededChars = tf.nn.embedding_lookup(self.W, self.inputX)
-            # 添加一个通道维度
-            self.embededCharsExpand = tf.expand_dims(self.embededChars, -1)
+            embededChars = tf.nn.embedding_lookup(W, inputX)
+            # 添加一个维度
+            embededCharsExpand = tf.expand_dims(embededChars, -1)
 
+        # 拼接word embedding和char embedding
+        tf.concat(0 , 0)
+
+        cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
+        qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
 
         embedding_layer = tf.keras.layers.Embedding(self.max_features,
                                                     self.emb_size,
@@ -291,7 +282,7 @@ if __name__ == '__main__':
         emb_size=50,
         max_features=len(ds.charset)
     )
-    bidaf.build_model()
+    bidaf.build_model(word_index, charEmbedding, charset)
     bidaf.model.fit(
         [train_c, train_q], train_y,
         batch_size=64,

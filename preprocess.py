@@ -25,7 +25,7 @@ class Preprocessor:
         self.charset = ['[PAD]', '[CLS]', '[SEP]'] + self.charset + ['[UNK]']
         charEmbedding = []
         charEmbedding.append(np.zeros(len(self.charset), dtype="float32"))
-        for i, alpha in enumerate(self.charset):
+        for i, _ in enumerate(self.charset):
             onehot = np.zeros(len(self.charset), dtype="float32")
 
             # 生成每个字符对应的向量
