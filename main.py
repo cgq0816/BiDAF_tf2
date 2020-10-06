@@ -85,7 +85,6 @@ class BiDAF:
 
         # 匹配GloVe向量
         # embedding_weight = np.zeros([word_num, embedding_dim])
-        # 10000*100维度
         embedding_matrix = np.random.uniform(-0.05, 0.05, size=[word_num, embedding_dim])
         for word, i in word_index.items():
             if i < word_num:
@@ -94,26 +93,20 @@ class BiDAF:
                     # Words在embedding index没找到就置0.
                     embedding_matrix[i] = embedding_vector
 
-        # 获得单词嵌入
-        embededWords = tf.nn.embedding_lookup()
-        model = tf.keras.Sequential()
-        model.add(Embedding(word_num, embedding_dim, weights=[embedding_matrix]))
+        # 获得词的嵌入
+        embededWords = tf.keras.layers.Embedding(word_num, embedding_dim, weights=[embedding_matrix])
 
         # CNN char embedding的获取
         inputX = tf.placeholder(tf.int32, [None, len(charset)], name="inputX")
 
         # 字符嵌入
         with tf.name_scope("CNN char embedding"):
-
             # 利用one-hot的字符向量作为初始化词嵌入矩阵
             W = tf.Variable(tf.cast(charEmbedding, dtype=tf.float32, name="charEmbedding"), name="W")
-            # 获得字符嵌入
+            # 获得字符的嵌入
             embededChars = tf.nn.embedding_lookup(W, inputX)
             # 添加一个维度
             embededCharsExpand = tf.expand_dims(embededChars, -1)
-
-        # 拼接word embedding和char embedding
-        tf.concat(0 , 0)
 
         cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
         qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
