@@ -14,8 +14,6 @@ import numpy as np
 from tensorflow.keras.preprocessing.sequence import pad_sequences
 from tensorflow.keras.layers import Dense, GlobalAveragePooling1D, Embedding
 
-GLove_path = '{}\glove.6B\glove.6B.50d.txt'.format(os.path.dirname(os.path.abspath(__file__)))
-
 
 print("tf.__version__:", tf.__version__)
 gpus = tf.config.experimental.list_physical_devices('GPU')
@@ -34,7 +32,10 @@ if gpus:
 class BiDAF:
 
     def __init__(
-            self, clen, qlen, emb_size,
+            self, clen, qlen, max_char_len, emb_size,
+            vocab_size,
+            embedding_matrix,
+            conv_layers=[],
             max_features=5000,
             num_highway_layers=2,
             encoder_dropout=0,
@@ -44,6 +45,7 @@ class BiDAF:
         """
         双向注意流模型
         :param clen:context 长度
+        :param max_char_len: 最大char长度
         :param qlen: question 长度
         :param emb_size: 词向量维度
         :param max_features: 词汇表最大数量
@@ -54,69 +56,64 @@ class BiDAF:
         """
         self.clen = clen
         self.qlen = qlen
+        self.max_char_len = max_char_len
         self.max_features = max_features
         self.emb_size = emb_size
+        self.vocab_size = vocab_size
+        self.embedding_matrix = embedding_matrix
+        self.conv_layers = conv_layers
         self.num_highway_layers = num_highway_layers
         self.encoder_dropout = encoder_dropout
         self.num_decoders = num_decoders
         self.decoder_dropout = decoder_dropout
 
-    def build_model(self, word_index, charEmbedding, charset):
+    def build_model(self):
         """
         构建模型
         :return:
         """
         # 1 embedding 层
-        # TODO：homework：使用glove word embedding（或自己训练的w2v） 和 CNN char embedding 
+        # 获取char级别的Embedding
+        cinn_c = tf.keras.layers.Input(shape=(self.clen, self.max_char_len), name='context_input_char')
+        qinn_c = tf.keras.layers.Input(shape=(self.qlen, self.max_char_len), name='question_input_char')
 
-        # glove word embedding的获取
-        word_num = 10000
-        # GloVe的向量维度
-        embedding_dim = 100
+        embedding_layer_char = tf.keras.layers.Embedding(self.max_features, self.emb_size, embeddings_initializer='uniform')
 
-        # 调用glove
-        embeddings_index = {}
-        with open(GLove_path, 'r') as f:
-            for line in f:
-                values = line.split()
-                word = values[0]
-                coefs = np.asarray(values[1:], dtype='float32')
-                embeddings_index[word] = coefs
+        emb_cc = embedding_layer_char(cinn_c)
+        emb_qc = embedding_layer_char(qinn_c)
 
-        # 匹配GloVe向量
-        # embedding_weight = np.zeros([word_num, embedding_dim])
-        embedding_matrix = np.random.uniform(-0.05, 0.05, size=[word_num, embedding_dim])
-        for word, i in word_index.items():
-            if i < word_num:
-                embedding_vector = embeddings_index.get(word)
-                if embedding_vector is not None:
-                    # Words在embedding index没找到就置0.
-                    embedding_matrix[i] = embedding_vector
+        c_conv_out = []
+        filter_sizes = sum(list(np.array(self.conv_layers).T(0)))
+        assert filter_sizes==self.emb_size
+        for filters, kernel_size in self.conv_layers:
+            # 使用二维卷积
+            conv = tf.keras.layers.Conv2D(filters=filters, kernel_size=[kernel_size, self.emb_size], strides=1,
+                                          activation=tf.nn.relu, padding='same')(emb_cc)
+            conv = tf.reduce_max(conv, 2)
+            c_conv_out.append(conv)
+        c_conv_out = tf.keras.layers.concatenate(c_conv_out)
+        # c_conv_out = tf.reshape(c_conv_out, [-1, self.clen, self.emb_size])
 
-        # 获得词的嵌入
-        embededWords = tf.keras.layers.Embedding(word_num, embedding_dim, weights=[embedding_matrix])
+        q_conv_out = []
+        for filters, kernel_size in self.conv_layers:
+            conv = tf.keras.layers.Conv2D(filters=filters, kernel_size=[kernel_size, self.emb_size], strides=1,
+                                          activation='relu', padding='same')(emb_qc)
+            conv = tf.reduce_max(conv, 2)
+            q_conv_out.append(conv)
+        q_conv_out = tf.keras.layers.concatenate(q_conv_out)
+        q_conv_out = tf.reshape(q_conv_out, [-1, self.clen, self.emb_size])
 
-        # CNN char embedding的获取
-        inputX = tf.placeholder(tf.int32, [None, len(charset)], name="inputX")
+        # word级别的Input,Embedding的构建
+        cinn_w = tf.keras.layers.Input(shape=(self.clen), name='context_input_word')
+        qinn_w = tf.keras.layers.Input(shape=(self.clen), name='question_input_word')
+        embedding_layer_word = tf.keras.layers.Embedding(self.vocab_size, self.emb_size,
+                                                         embeddings_initializer=tf.constant_initializer(self.embedding_matrix), trainable=True)
+        emb_cw = embedding_layer_word(cinn_w)
+        emb_qw = embedding_layer_word(qinn_w)
 
-        # 字符嵌入
-        with tf.name_scope("CNN char embedding"):
-            # 利用one-hot的字符向量作为初始化词嵌入矩阵
-            W = tf.Variable(tf.cast(charEmbedding, dtype=tf.float32, name="charEmbedding"), name="W")
-            # 获得字符的嵌入
-            embededChars = tf.nn.embedding_lookup(W, inputX)
-            # 添加一个维度
-            embededCharsExpand = tf.expand_dims(embededChars, -1)
-
-        cinn = tf.keras.layers.Input(shape=(self.clen,), name='context_input')
-        qinn = tf.keras.layers.Input(shape=(self.qlen,), name='question_input')
-
-        embedding_layer = tf.keras.layers.Embedding(self.max_features,
-                                                    self.emb_size,
-                                                    embeddings_initializer='uniform',
-                                                    )
-        cemb = embedding_layer(cinn)
-        qemb = embedding_layer(qinn)
+        # 进行word和char Embedding拼接
+        cemb = tf.concat([emb_cw, c_conv_out], axis=2)
+        qemb = tf.concat([emb_qw, q_conv_out], axis=2)
 
         for i in range(self.num_highway_layers):
             """
@@ -179,7 +176,7 @@ class BiDAF:
         output_layer = layers.Combine(name='CombineOutputs')
         out = output_layer([span_begin_prob, span_end_prob])
 
-        inn = [cinn, qinn]
+        inn = [cemb, qemb]
 
         self.model = tf.keras.models.Model(inn, out)
         self.model.summary(line_length=128)
@@ -258,27 +255,25 @@ if __name__ == '__main__':
         './data/squad/dev-v1.1.json'
     ])
 
-    # 获得glove需要的word字符集
-    word_index = ds.build_words()
-    # 获得char cnn需要的char字符集
-    ch2id, id2ch, charset, charEmbedding = ds.build_charset()
+    train_cc, train_qc, train_cw, train_qw, train_y = ds.get_dataset('./data/squad/train-v1.1.json')
+    test_cc, test_qc, test_cw, test_qw, test_y = ds.get_dataset('./data/squad/dev-v1.1.json')
 
-    train_c, train_q, train_y = ds.get_dataset('./data/squad/train-v1.1.json')
-    test_c, test_q, test_y = ds.get_dataset('./data/squad/dev-v1.1.json')
-
-    print(train_c.shape, train_q.shape, train_y.shape)
-    print(test_c.shape, test_q.shape, test_y.shape)
+    print(train_cc.shape, train_qc.shape, train_cw.shape, train_qw.shape, train_y.shape)
+    print(test_cc.shape, test_qc.shape, test_cw.shape, test_qw.shape, test_y.shape)
 
     bidaf = BiDAF(
         clen=ds.max_clen,
         qlen=ds.max_qlen,
+        max_char_len=ds.max_char_len,
         emb_size=50,
+        vocab_size=len(ds.word_list),
+        embedding_matri=ds.embedding_matrix,
         max_features=len(ds.charset)
     )
-    bidaf.build_model(word_index, charEmbedding, charset)
+    bidaf.build_model()
     bidaf.model.fit(
-        [train_c, train_q], train_y,
+        [train_cc, train_qc, train_cw, train_qw], train_y,
         batch_size=64,
         epochs=10,
-        validation_data=([test_c, test_q], test_y)
+        validation_data=([test_cc, test_qc, test_cw, test_qw], test_y)
     )
