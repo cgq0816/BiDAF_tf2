@@ -23,7 +23,7 @@ class Q2CAttention(tf.keras.layers.Layer):
         max_similarity = tf.reduce_max(similarity, axis=1)
 
         # 对以上矩阵进行 softmax 归一化计算 context 向量加权和
-        c2q = tf.expand_dims(tf.keras.activations.softmax(max_similarity), axis=1)
+        c2q = tf.expand_dims(tf.nn.softmax(max_similarity), axis=1)
         c2q_matmul = tf.matmul(c2q, cencode)
 
         # 一个query word可能挑出几个相似度较高context word，
